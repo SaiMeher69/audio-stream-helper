@@ -1,12 +1,20 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+
+import AudioStreamer from "@/components/AudioStreamer";
 
 const Index = () => {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4">Welcome to Your Blank App</h1>
-        <p className="text-xl text-gray-600">Start building your amazing project here!</p>
-      </div>
+    <div className="min-h-screen flex flex-col">
+      <header className="py-6 px-4 border-b border-border">
+        <h1 className="text-2xl font-bold text-center">Audio Stream Processor</h1>
+      </header>
+      
+      <main className="flex-1 flex items-center justify-center p-4">
+        <AudioStreamer />
+      </main>
+      
+      <footer className="py-4 px-4 border-t border-border text-center text-sm text-muted-foreground">
+        <p>Low-latency audio streaming with WebRTC</p>
+      </footer>
     </div>
   );
 };
