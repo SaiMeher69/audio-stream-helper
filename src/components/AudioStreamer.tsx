@@ -4,18 +4,19 @@ import { Mic, Volume2, Wifi, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { 
-  rtcConfig, 
   defaultAudioConstraints, 
   getAudioLevel, 
-  connectStreamToAnalyzer 
+  connectStreamToAnalyzer,
+  createAudioProcessor
 } from "@/utils/audioUtils";
+import WebSocketService from "@/services/websocketService";
 
 interface AudioStreamerProps {
-  backendUrl?: string; // Optional backend URL (default to echo server if not provided)
+  backendUrl?: string; // WebSocket URL for backend
 }
 
 const AudioStreamer: React.FC<AudioStreamerProps> = ({ 
-  backendUrl = "wss://echo.webrtc.org" // Default echo server for testing
+  backendUrl = "ws://localhost:8000/ws" // Default to local FastAPI WebSocket
 }) => {
   const { toast } = useToast();
   
@@ -29,13 +30,13 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
   const [outputLevel, setOutputLevel] = useState(0);
   
   // Refs for persistent values between renders
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
-  const remoteStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const inputAnalyzerRef = useRef<AnalyserNode | null>(null);
   const outputAnalyzerRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const webSocketRef = useRef<WebSocketService | null>(null);
   
   // Audio element for playback
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
@@ -48,10 +49,16 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
       animationFrameRef.current = null;
     }
     
-    // Close peer connection
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
+    // Disconnect WebSocket
+    if (webSocketRef.current) {
+      webSocketRef.current.disconnect();
+      webSocketRef.current = null;
+    }
+    
+    // Stop processor if running
+    if (processorRef.current && audioContextRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
     }
     
     // Stop local stream tracks
@@ -73,99 +80,80 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
     setOutputLevel(0);
   };
 
-  // Setup WebRTC connection
-  const setupPeerConnection = async () => {
+  // Setup WebSocket connection
+  const setupWebSocketConnection = async () => {
     try {
-      // Create peer connection
-      const peerConnection = new RTCPeerConnection(rtcConfig);
-      peerConnectionRef.current = peerConnection;
+      const webSocketService = new WebSocketService(backendUrl);
+      webSocketRef.current = webSocketService;
       
-      // Handle ICE candidates
-      peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-          console.log("New ICE candidate:", event.candidate);
-        }
-      };
-      
-      // Handle connection state changes
-      peerConnection.onconnectionstatechange = () => {
-        console.log("Connection state:", peerConnection.connectionState);
-        setIsConnected(peerConnection.connectionState === 'connected');
-        
-        if (
-          peerConnection.connectionState === 'disconnected' || 
-          peerConnection.connectionState === 'failed' ||
-          peerConnection.connectionState === 'closed'
-        ) {
-          toast({
-            title: "Connection lost",
-            description: "The connection to the audio server was lost.",
-            variant: "destructive",
-          });
-          cleanupResources();
-        }
-      };
-      
-      // Create remote stream for receiving audio
-      const remoteStream = new MediaStream();
-      remoteStreamRef.current = remoteStream;
-      
-      // When remote tracks are received, add them to our remote stream
-      peerConnection.ontrack = (event) => {
-        console.log("Received remote track:", event.track.kind);
-        event.streams[0].getTracks().forEach(track => {
-          remoteStream.addTrack(track);
+      // Register event handlers
+      webSocketService.onConnect(() => {
+        setIsConnected(true);
+        toast({
+          title: "Connected to server",
+          description: "Audio streaming connection established."
         });
-        
-        if (audioElementRef.current) {
-          audioElementRef.current.srcObject = remoteStream;
+      });
+      
+      webSocketService.onDisconnect(() => {
+        setIsConnected(false);
+        toast({
+          title: "Disconnected from server",
+          description: "The connection to the audio server was lost.",
+          variant: "destructive",
+        });
+      });
+      
+      webSocketService.onMessage((audioData) => {
+        if (audioElementRef.current && audioContextRef.current) {
+          // Process received audio data
+          const audioContext = audioContextRef.current;
           
-          // Set up analyzer for output audio
-          if (audioContextRef.current) {
-            const audioContext = audioContextRef.current;
-            const { analyzer } = connectStreamToAnalyzer(remoteStream, audioContext);
-            outputAnalyzerRef.current = analyzer;
+          // Convert ArrayBuffer to AudioBuffer and play it
+          audioContext.decodeAudioData(audioData, (buffer) => {
+            const source = audioContext.createBufferSource();
+            source.buffer = buffer;
             
-            // Start polling audio levels
-            startAudioLevelMonitoring();
-          }
+            // Connect to audio output and analyzer for visualization
+            if (outputAnalyzerRef.current) {
+              source.connect(outputAnalyzerRef.current);
+              outputAnalyzerRef.current.connect(audioContext.destination);
+            } else {
+              source.connect(audioContext.destination);
+            }
+            
+            source.start();
+          }).catch(err => {
+            console.error("Error decoding audio data:", err);
+          });
         }
-      };
+      });
       
-      // Add local audio track to peer connection
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => {
-          peerConnection.addTrack(track, localStreamRef.current!);
-        });
+      // Connect to WebSocket server
+      await webSocketService.connect();
+      
+      // Set up audio processor for sending data
+      if (audioContextRef.current && localStreamRef.current) {
+        const processor = createAudioProcessor(audioContextRef.current, localStreamRef.current);
+        processorRef.current = processor;
+        
+        // Connect processor to destination (for local monitoring if needed)
+        // processor.connect(audioContextRef.current.destination);
+        
+        // Process audio data and send it over WebSocket
+        processor.onaudioprocess = (e) => {
+          if (webSocketService.connected) {
+            const inputData = e.inputBuffer.getChannelData(0);
+            webSocketService.sendAudioData(inputData);
+          }
+        };
       }
       
-      // Create and set local description (offer)
-      const offer = await peerConnection.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: false
-      });
-      await peerConnection.setLocalDescription(offer);
-      
-      // For this example, we'll simulate a server response with a local answer
-      // In a real application, you would send the offer to your server and get an answer back
-      setTimeout(async () => {
-        if (peerConnection.localDescription) {
-          const answer = await peerConnection.createAnswer();
-          await peerConnection.setRemoteDescription(
-            peerConnection.localDescription
-          );
-          await peerConnection.setLocalDescription(answer);
-          
-          console.log("Local connection established");
-          setIsConnected(true);
-        }
-      }, 500);
-      
     } catch (error) {
-      console.error("Error setting up WebRTC:", error);
+      console.error("Error setting up WebSocket:", error);
       toast({
         title: "Connection error",
-        description: "Could not establish WebRTC connection.",
+        description: "Could not establish connection to the audio server.",
         variant: "destructive",
       });
       cleanupResources();
@@ -218,11 +206,20 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
       const { analyzer } = connectStreamToAnalyzer(stream, audioContext);
       inputAnalyzerRef.current = analyzer;
       
+      // Create output analyzer
+      const outputAnalyzer = audioContext.createAnalyser();
+      outputAnalyzer.fftSize = 256;
+      outputAnalyzer.smoothingTimeConstant = 0.5;
+      outputAnalyzerRef.current = outputAnalyzer;
+      
       // Start streaming
       setIsStreaming(true);
       
-      // Setup WebRTC connection
-      setupPeerConnection();
+      // Setup WebSocket connection
+      await setupWebSocketConnection();
+      
+      // Start audio level monitoring
+      startAudioLevelMonitoring();
       
       toast({
         title: "Streaming started",
@@ -286,8 +283,8 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
         <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
           {isConnected ? (
             <>
-              <Wifi className="w-4 h-4 text-audio-input" />
-              <span>Connected to server</span>
+              <Wifi className="w-4 h-4 text-primary" />
+              <span>Connected to FastAPI server</span>
             </>
           ) : (
             <>

@@ -9,11 +9,11 @@ const Index = () => {
       </header>
       
       <main className="flex-1 flex items-center justify-center p-4">
-        <AudioStreamer />
+        <AudioStreamer backendUrl="ws://localhost:8000/ws" />
       </main>
       
       <footer className="py-4 px-4 border-t border-border text-center text-sm text-muted-foreground">
-        <p>Low-latency audio streaming with WebRTC</p>
+        <p>Low-latency audio streaming with FastAPI WebSockets</p>
       </footer>
     </div>
   );

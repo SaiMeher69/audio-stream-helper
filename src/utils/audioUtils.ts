@@ -17,7 +17,7 @@ export const defaultAudioConstraints: MediaTrackConstraints = {
   echoCancellation: false, // Disable echo cancellation for lower latency
   noiseSuppression: false, // Disable noise suppression for lower latency
   autoGainControl: false,  // Disable auto gain for more consistent levels
-  latency: 0.005,          // Request lowest possible latency (5ms)
+  // latency: 0.005,       // Removed - not a valid MediaTrackConstraints property
   sampleRate: 48000,       // Higher sample rate for better quality
   channelCount: 1,         // Mono for simplicity and lower bandwidth
 };
@@ -54,4 +54,19 @@ export function connectStreamToAnalyzer(
   const analyzer = createAnalyzer(audioContext);
   source.connect(analyzer);
   return { source, analyzer };
+}
+
+// Create an audio processor for WebSocket streaming
+export function createAudioProcessor(
+  audioContext: AudioContext,
+  stream: MediaStream
+): ScriptProcessorNode {
+  // Create script processor node for raw audio processing
+  const processor = audioContext.createScriptProcessor(1024, 1, 1);
+  
+  // Connect stream to processor
+  const source = audioContext.createMediaStreamSource(stream);
+  source.connect(processor);
+  
+  return processor;
 }
