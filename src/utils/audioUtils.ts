@@ -17,7 +17,7 @@ export const defaultAudioConstraints: MediaTrackConstraints = {
   echoCancellation: false, // Disable echo cancellation for lower latency
   noiseSuppression: false, // Disable noise suppression for lower latency
   autoGainControl: false,  // Disable auto gain for more consistent levels
-  // latency: 0.005,       // Removed - not a valid MediaTrackConstraints property
+  // Removed latency property as it's not valid in MediaTrackConstraints
   sampleRate: 48000,       // Higher sample rate for better quality
   channelCount: 1,         // Mono for simplicity and lower bandwidth
 };
