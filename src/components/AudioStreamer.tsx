@@ -15,7 +15,7 @@ interface AudioStreamerProps {
 }
 
 const AudioStreamer: React.FC<AudioStreamerProps> = ({ 
-  backendUrl = "http://localhost:8008/ws" // Default to local FastAPI WebSocket
+  backendUrl = "ws://localhost:8000/ws" // Updated to use ws:// protocol
 }) => {
   const { toast } = useToast();
   
@@ -37,8 +37,109 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const webSocketRef = useRef<WebSocketService | null>(null);
   
+  // Setup WebSocket connection
+  useEffect(() => {
+    const setupWebSocketConnection = async () => {
+      try {
+        // Only create a new WebSocket connection if one doesn't exist
+        if (!webSocketRef.current) {
+          console.log("Setting up new WebSocket connection");
+          
+          // Create new audio context if not exists
+          if (!audioContextRef.current) {
+            audioContextRef.current = new AudioContext({
+              latencyHint: 'interactive', // Low latency mode
+              sampleRate: 48000
+            });
+          }
+          
+          const webSocketService = new WebSocketService(backendUrl);
+          webSocketRef.current = webSocketService;
+          
+          // Register event handlers
+          webSocketService.onConnect(() => {
+            setIsConnected(true);
+            console.log("WebSocket connected successfully");
+            toast({
+              title: "Connected to server",
+              description: "Audio streaming connection established."
+            });
+          });
+          
+          webSocketService.onDisconnect(() => {
+            setIsConnected(false);
+            console.log("WebSocket disconnected");
+            toast({
+              title: "Disconnected from server",
+              description: "The connection to the audio server was lost.",
+              variant: "destructive",
+            });
+          });
+          
+          webSocketService.onMessage((audioData) => {
+            console.log("Audio data received from server");
+            if (audioContextRef.current) {
+              try {
+                // Process received audio data
+                const audioContext = audioContextRef.current;
+                
+                // Convert ArrayBuffer to AudioBuffer and play it
+                audioContext.decodeAudioData(audioData, (buffer) => {
+                  // Create a buffer source for playback
+                  const source = audioContext.createBufferSource();
+                  source.buffer = buffer;
+                  
+                  // Connect to output analyzer for visualization if available
+                  if (outputAnalyzerRef.current) {
+                    source.connect(outputAnalyzerRef.current);
+                    outputAnalyzerRef.current.connect(audioContext.destination);
+                  } else {
+                    // Connect directly to destination if no analyzer
+                    source.connect(audioContext.destination);
+                  }
+                  
+                  // Start playing the audio immediately
+                  source.start(0);
+                  
+                  console.log("Playing received audio data");
+                }).catch(err => {
+                  console.error("Error decoding audio data:", err);
+                });
+              } catch (error) {
+                console.error("Error processing audio response:", error);
+              }
+            }
+          });
+          
+          // Connect to WebSocket server
+          await webSocketService.connect();
+        }
+      } catch (error) {
+        console.error("Error setting up WebSocket:", error);
+        toast({
+          title: "Connection error",
+          description: "Could not establish connection to the audio server.",
+          variant: "destructive",
+        });
+      }
+    };
+
+    setupWebSocketConnection();
+    
+    // Cleanup only when component unmounts
+    return () => {
+      if (webSocketRef.current) {
+        console.log("Cleaning up WebSocket connection on unmount");
+        webSocketRef.current.disconnect();
+        webSocketRef.current = null;
+      }
+    };
+  }, [backendUrl, toast]);
+
   // Clean up resources when component unmounts or streaming stops
-  const cleanupResources = () => {
+  const cleanupStreamingResources = () => {
+    console.log("Cleaning up streaming resources");
+    
     // Stop animation frame if running
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
@@ -57,118 +158,10 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
       localStreamRef.current = null;
     }
     
-    // Disconnect WebSocket last after all other resources are cleaned up
-    if (webSocketRef.current) {
-      webSocketRef.current.disconnect();
-      webSocketRef.current = null;
-    }
-    
-    // Close audio context
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    
     // Reset state
     setIsStreaming(false);
-    setIsConnected(false);
     setInputLevel(0);
     setOutputLevel(0);
-  };
-
-  // Setup WebSocket connection
-  const setupWebSocketConnection = async () => {
-    try {
-      // Create new audio context if not exists
-      if (!audioContextRef.current) {
-        audioContextRef.current = new AudioContext({
-          latencyHint: 'interactive', // Low latency mode
-          sampleRate: 48000
-        });
-      }
-      
-      const webSocketService = new WebSocketService(backendUrl);
-      webSocketRef.current = webSocketService;
-      
-      // Register event handlers
-      webSocketService.onConnect(() => {
-        setIsConnected(true);
-        toast({
-          title: "Connected to server",
-          description: "Audio streaming connection established."
-        });
-      });
-      
-      webSocketService.onDisconnect(() => {
-        setIsConnected(false);
-        toast({
-          title: "Disconnected from server",
-          description: "The connection to the audio server was lost.",
-          variant: "destructive",
-        });
-      });
-      
-      webSocketService.onMessage((audioData) => {
-        console.log("1")
-        if (audioContextRef.current) {
-          try {
-            // Process received audio data
-            const audioContext = audioContextRef.current;
-            
-            // Convert ArrayBuffer to AudioBuffer and play it
-            audioContext.decodeAudioData(audioData, (buffer) => {
-              // Create a buffer source for playback
-              const source = audioContext.createBufferSource();
-              source.buffer = buffer;
-              
-              // Connect to output analyzer for visualization if available
-              if (outputAnalyzerRef.current) {
-                source.connect(outputAnalyzerRef.current);
-                outputAnalyzerRef.current.connect(audioContext.destination);
-              } else {
-                // Connect directly to destination if no analyzer
-                source.connect(audioContext.destination);
-              }
-              
-              // Start playing the audio immediately
-              source.start(0);
-              
-              console.log("Playing received audio data");
-            }).catch(err => {
-              console.error("Error decoding audio data:", err);
-            });
-          } catch (error) {
-            console.error("Error processing audio response:", error);
-          }
-        }
-      });
-      
-      // Connect to WebSocket server
-      await webSocketService.connect();
-      
-      // Set up audio processor for sending data only if we have local stream
-      if (audioContextRef.current && localStreamRef.current) {
-        const processor = createAudioProcessor(audioContextRef.current, localStreamRef.current);
-        processorRef.current = processor;
-        
-        // Process audio data and send it over WebSocket
-        processor.onaudioprocess = (e) => {
-          if (webSocketService.connected) {
-            console.log("Sending audio data...........");
-            const inputData = e.inputBuffer.getChannelData(0);
-            webSocketService.sendAudioData(inputData);
-          }
-        };
-      }
-      
-    } catch (error) {
-      console.error("Error setting up WebSocket:", error);
-      toast({
-        title: "Connection error",
-        description: "Could not establish connection to the audio server.",
-        variant: "destructive",
-      });
-    }
   };
 
   // Monitor audio levels for visualization
@@ -188,15 +181,45 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
     animationFrameRef.current = requestAnimationFrame(updateLevels);
   };
 
+  // Set up audio processor when streaming starts
+  useEffect(() => {
+    if (isStreaming && audioContextRef.current && localStreamRef.current && webSocketRef.current) {
+      console.log("Setting up audio processor for streaming");
+      const processor = createAudioProcessor(audioContextRef.current, localStreamRef.current);
+      processorRef.current = processor;
+      
+      // Connect processor to destination to keep it running
+      processor.connect(audioContextRef.current.destination);
+      
+      // Process audio data and send it over WebSocket
+      processor.onaudioprocess = (e) => {
+        if (webSocketRef.current && webSocketRef.current.connected) {
+          console.log("Sending audio data via WebSocket");
+          const inputData = e.inputBuffer.getChannelData(0);
+          webSocketRef.current.sendAudioData(inputData);
+        }
+      };
+    }
+    
+    return () => {
+      if (processorRef.current && audioContextRef.current) {
+        processorRef.current.disconnect();
+        processorRef.current = null;
+      }
+    };
+  }, [isStreaming]);
+
   // Request microphone access and start streaming
-  const startStreaming = async () => {
+  const toggleStreaming = async () => {
     try {
       // If already streaming, stop it
       if (isStreaming) {
-        cleanupResources();
+        console.log("Stopping streaming");
+        cleanupStreamingResources();
         return;
-
       }
+      
+      console.log("Starting streaming");
       
       // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -207,28 +230,28 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
       localStreamRef.current = stream;
       setMicPermission(true);
       
-      // Create audio context
-      const audioContext = new AudioContext({
-        latencyHint: 'interactive', // Low latency mode
-        sampleRate: 48000
-      });
-      audioContextRef.current = audioContext;
+      // Create audio context if it doesn't exist
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext({
+          latencyHint: 'interactive', // Low latency mode
+          sampleRate: 48000
+        });
+      }
       
       // Connect input stream to analyzer
-      const { analyzer } = connectStreamToAnalyzer(stream, audioContext);
+      const { analyzer } = connectStreamToAnalyzer(stream, audioContextRef.current);
       inputAnalyzerRef.current = analyzer;
       
-      // Create output analyzer
-      const outputAnalyzer = audioContext.createAnalyser();
-      outputAnalyzer.fftSize = 256;
-      outputAnalyzer.smoothingTimeConstant = 0.5;
-      outputAnalyzerRef.current = outputAnalyzer;
+      // Create output analyzer if it doesn't exist
+      if (!outputAnalyzerRef.current && audioContextRef.current) {
+        const outputAnalyzer = audioContextRef.current.createAnalyser();
+        outputAnalyzer.fftSize = 256;
+        outputAnalyzer.smoothingTimeConstant = 0.5;
+        outputAnalyzerRef.current = outputAnalyzer;
+      }
       
       // Start streaming
       setIsStreaming(true);
-      
-      // Setup WebSocket connection
-      await setupWebSocketConnection();
       
       // Start audio level monitoring
       startAudioLevelMonitoring();
@@ -256,14 +279,24 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
         });
       }
       
-      cleanupResources();
+      cleanupStreamingResources();
     }
   };
 
   // Clean up on component unmount
   useEffect(() => {
     return () => {
-      cleanupResources();
+      cleanupStreamingResources();
+      
+      if (webSocketRef.current) {
+        webSocketRef.current.disconnect();
+        webSocketRef.current = null;
+      }
+      
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
     };
   }, []);
 
@@ -335,7 +368,7 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
         
         {/* Stream control button */}
         <Button
-          onClick={startStreaming}
+          onClick={toggleStreaming}
           className={`mt-8 px-8 py-6 rounded-full w-32 h-32 flex items-center justify-center transition-all ${
             isStreaming 
               ? 'bg-destructive hover:bg-destructive/90' 
