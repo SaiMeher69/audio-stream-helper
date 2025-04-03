@@ -15,7 +15,7 @@ interface AudioStreamerProps {
 }
 
 const AudioStreamer: React.FC<AudioStreamerProps> = ({ 
-  backendUrl = "ws://localhost:8000/ws" // Updated to use ws:// protocol
+  backendUrl = "ws://localhost:8008/ws" // Updated to use ws:// protocol
 }) => {
   const { toast } = useToast();
   
