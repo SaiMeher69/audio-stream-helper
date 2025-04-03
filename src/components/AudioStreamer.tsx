@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from "react";
 import { Mic, Volume2, Wifi, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,7 @@ interface AudioStreamerProps {
 }
 
 const AudioStreamer: React.FC<AudioStreamerProps> = ({ 
-  backendUrl = "ws://localhost:8008/ws" // Updated to use ws:// protocol
+  backendUrl = "ws://localhost:8000/ws" 
 }) => {
   const { toast } = useToast();
   
@@ -77,7 +78,7 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
           });
           
           webSocketService.onMessage((audioData) => {
-            console.log("Audio data received from server");
+            console.log("Audio data received from server, size:", audioData.byteLength);
             if (audioContextRef.current) {
               try {
                 // Process received audio data
@@ -194,7 +195,7 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
       // Process audio data and send it over WebSocket
       processor.onaudioprocess = (e) => {
         if (webSocketRef.current && webSocketRef.current.connected) {
-          console.log("Sending audio data via WebSocket");
+          console.log("Processing audio buffer");
           const inputData = e.inputBuffer.getChannelData(0);
           webSocketRef.current.sendAudioData(inputData);
         }
@@ -288,6 +289,7 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
     return () => {
       cleanupStreamingResources();
       
+      // Only disconnect and close on full component unmount
       if (webSocketRef.current) {
         webSocketRef.current.disconnect();
         webSocketRef.current = null;

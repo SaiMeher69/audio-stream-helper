@@ -82,14 +82,23 @@ class WebSocketService {
     }
   }
 
-  sendAudioData(audioData: Float32Array | ArrayBuffer): void {
+  sendAudioData(audioData: Float32Array): void {
     if (this.socket && this.isConnected) {
-      // If it's a Float32Array, convert to ArrayBuffer before sending
-      const dataToSend = audioData instanceof Float32Array 
-        ? audioData.buffer 
-        : audioData;
+      // Convert Float32Array to Int16Array (16-bit PCM format)
+      const int16Data = new Int16Array(audioData.length);
       
-      this.socket.send(dataToSend);
+      // Convert Float32 (-1.0 to 1.0) to Int16 (-32768 to 32767)
+      for (let i = 0; i < audioData.length; i++) {
+        // Scale to int16 range and clamp to avoid overflow
+        const sample = Math.max(-1, Math.min(1, audioData[i]));
+        int16Data[i] = Math.floor(sample * 32767);
+      }
+      
+      console.log('Sending 16-bit PCM audio data, first few samples:', 
+                  int16Data.slice(0, 5), 
+                  'length:', int16Data.length);
+      
+      this.socket.send(int16Data.buffer);
     }
   }
 
