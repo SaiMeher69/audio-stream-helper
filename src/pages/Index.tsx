@@ -9,7 +9,7 @@ const Index = () => {
       </header>
       
       <main className="flex-1 flex items-center justify-center p-4">
-        <AudioStreamer backendUrl="ws://localhost:8000/ws" />
+        <AudioStreamer backendUrl="http://localhost:8008/ws" />
       </main>
       
       <footer className="py-4 px-4 border-t border-border text-center text-sm text-muted-foreground">

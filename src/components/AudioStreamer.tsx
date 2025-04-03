@@ -15,7 +15,7 @@ interface AudioStreamerProps {
 }
 
 const AudioStreamer: React.FC<AudioStreamerProps> = ({ 
-  backendUrl = "ws://localhost:8000/ws" // Default to local FastAPI WebSocket
+  backendUrl = "http://localhost:8008/ws" // Default to local FastAPI WebSocket
 }) => {
   const { toast } = useToast();
   
@@ -109,6 +109,7 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
       });
       
       webSocketService.onMessage((audioData) => {
+        console.log("1")
         if (audioContextRef.current) {
           try {
             // Process received audio data
@@ -153,6 +154,7 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
         // Process audio data and send it over WebSocket
         processor.onaudioprocess = (e) => {
           if (webSocketService.connected) {
+            console.log("Sending audio data...........");
             const inputData = e.inputBuffer.getChannelData(0);
             webSocketService.sendAudioData(inputData);
           }
@@ -193,6 +195,7 @@ const AudioStreamer: React.FC<AudioStreamerProps> = ({
       if (isStreaming) {
         cleanupResources();
         return;
+
       }
       
       // Request microphone access
